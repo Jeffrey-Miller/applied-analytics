@@ -1,0 +1,193 @@
+---
+title: "Electric Utility Reliability Forecasting- Logistic Regression"
+author: "Kristen Guy and Jeff Miller" 
+date: "November 14, 2016"
+output: html_document
+---
+
+Jeff Miller, J_miller42@u.pacific.edu
+University of the Pacific, School of Engineering and Computer Science
+In fulfilment of the requirements for the degree of Master of Science in Analytics
+In conjunction with the Electric Utility Reliability Forecasting capstone project, 2016
+
+Version 4 - added data in lines for more data sets from step4
+Version 5 - added save model parameters to an rda object 
+Version 9 - skipped 6-8 to have all active versions on v 9
+
+This code ingests either the weather merged analytic data set for either the balanced or imbalanced operational data sets (but not both) at one time. The SourceFile file name needs to commented in/out below depending on use for balanced or imbalanced data sets, and produces a logistic regression model for which the performance metrics are a baseline for comparison with other model types.
+
+### Logistic Regression set up.
+```{r Setting the working directory, source file, and target variable, echo=FALSE}
+#setwd("C:/Users/kguy/UoP/! SMUD/Modeling")
+setwd("C:/Users/Jeff/Documents/Dropbox/PACIFIC_MS_Analytics/Sem_4/SMUD/R-CODE DEVELOPMENT")
+
+## Source File (Un-comment the file of interest)
+SourceFile = 'Bal_AnalyticFile_Static_v0_5.csvINTERP_WEATHER.csv'
+#SourceFile = 'ImBal_AnalyticFile_Static_v0_5.csvINTERP_WEATHER.csv'
+
+target_var = 'TYCOD_O'
+alpha = 0.05 #Global significance level
+Excluded_cols <- c('Date_Time', 'DEV_ID')
+alt_outputs = c('TYCOD_9', 'TYCOD_D', 'TYCOD_T')
+```
+
+Preprocessing script which randomly creates training and test data sets
+```{r pulling in preprocessing script, echo=FALSE}
+ source('SMUD__step1_Preprocessing_v8.r', encoding = 'UTF-8')
+```
+
+Pre model variable testing
+#Chi-Squared Tests on Discrete Independent Variables
+#Wilcoxon Tests on Continuous Independent Variables
+#Signifigance feature selection using Random Forest
+```{r pulling in pre-model variable tests script, echo=FALSE, warning=FALSE}
+source('SMUD__step2_Pre_Model_variable_testing_v8.r', encoding = 'UTF-8')
+```
+
+Feature set creation and sourcing
+#Creates data sets based on the null feature set (all), and additional feature sets based on the outcomes
+#of the Pre model variable testing
+```{r pulling in dataset 1-9 creation, echo=FALSE, warning=FALSE}
+source('SMUD__step4_Feature_Sets_v8.r', encoding = 'UTF-8')
+```   
+
+### Logistic Regression Model
+# Modeling example: https://www.r-bloggers.com/how-to-perform-a-logistic-regression-in-r/
+
+
+```{r global settings, echo=FALSE}
+set.seed(234987)
+```
+
+```{r initial model, echo=FALSE, warning=FALSE}
+data_featset <- data_featset4j  #Change the data_featset number to run alternate dataa sets in the model
+#colnames(data_featset)
+model <- glm(TYCOD_O ~.,family=binomial(link='logit'),   data=data_featset)
+print(summary(model))
+```
+
+```{r save model, echo=FALSE, warning=FALSE}
+#save model parameters to an rda object which can be reloaded by a predictor program
+save(model, file = "Prediction_Model_Params_LogReg_v2_optimal_18feartures_sig_feat_4e.rda")
+```
+
+### Predicting using the model 
+```{r prediction, echo=FALSE, warning=FALSE}
+newdata <- subset(data_featset, select = names(data_featset) %ni% c('TYCOD_O'))
+fitted.results <- predict(model,newdata,type='response') #Probability of classification
+fitted.results <- ifelse(fitted.results > 0.5,1,0)
+misClassMap=(fitted.results != data_featset$TYCOD_O)
+```
+
+```{r libraries, echo=FALSE}
+library(caret)
+```
+
+## confusion Matrix (in-sample)
+```{r in-sample prediction accuracy, echo=FALSE}
+insmple_conf = confusionMatrix(data=fitted.results,
+                reference=data_featset$TYCOD_O,
+                positive= '1')
+print(paste('In-sample Confusion matrix'))
+insmple_conf
+
+#Just in-sample accuracy
+insmple_conf$overall[1]
+```
+
+### Holdout Validation
+```{r holdout val, echo=FALSE}
+HO_idx <- sample(seq_len(nrow(data_featset)), size = floor(0.2 * nrow(data_featset)))
+hoTrn = data_featset[-HO_idx,]
+hoVal = data_featset[HO_idx,]
+ho_results = data.frame(fold = double(), TN = double(), FN = double(),
+                        FP = double(), TP = double(),
+                        Accuracy =double(), Sens = double(), speci=double(),
+                        stringsAsFactors=FALSE)
+homodel <- glm(TYCOD_O ~.,family=binomial(link='logit'),   data=hoTrn)
+
+newdata <- subset(hoVal, select = names(hoVal) %ni% c(target_var))
+fitted.results <- predict(homodel,newdata,type='response')
+hopred <- ifelse(fitted.results > 0.5,1,0)
+
+hoconf = confusionMatrix(data=hopred,
+                         reference=hoVal$TYCOD_O,
+                         positive= '1')
+ho_results[1,] = c(1, hoconf$table[1,1], hoconf$table[2,1],
+                   hoconf$table[1,2], hoconf$table[2,2],
+                   hoconf$overall[1], hoconf$byClass[1],hoconf$byClass[2] )
+
+print(paste('Hold-out Validation conf matrix '))
+hoconf
+
+#Just HO accuracy
+ho_results["Accuracy"]
+
+```
+
+### 10-Fold Cross-validation
+```{r cross-validation, echo=FALSE}
+kfold_cnt = 10
+set.seed(23890715)
+folds <- createFolds(data_featset$TYCOD_O, k = kfold_cnt)
+cv_results = data.frame(fold = double(), TN = double(), FN = double(),
+                        FP = double(), TP = double(),
+                        Accuracy =double(), Sens = double(), speci=double(),
+                        stringsAsFactors=FALSE)
+for (i in 1:kfold_cnt) {
+  cvTrn = data_featset[-folds[[i]],]
+  cvVal = data_featset[folds[[i]],]
+  cv_model <- glm(TYCOD_O ~.,family=binomial(link='logit'),   data=cvTrn)
+  newdata <- subset(cvVal, select = names(cvVal) %ni% c(target_var))
+  fitted.results <- predict(cv_model,newdata,type='response')
+  cvpred <- ifelse(fitted.results > 0.5,1,0)
+  cvconf = confusionMatrix(data=cvpred,
+                         reference=cvVal$TYCOD_O,
+                         positive= '1')
+  cv_results[i,] = c(i, cvconf$table[1,1], cvconf$table[2,1],
+                     cvconf$table[1,2], cvconf$table[2,2],
+                     cvconf$overall[1], cvconf$byClass[1],
+                     cvconf$byClass[2] )
+}
+print(paste('Cross-Validation results '))
+cv_results
+
+#Average of CV accurcay
+mean(cv_results$Accuracy)
+```
+### confusion Matrix (out-of-sample)
+```{r out-of-sample prediction accuracy, echo=FALSE}
+# out-of-sample prediction
+#tstdata <- subset(Tst, select = names(Tst) %in% c(names(data_featset)))
+tstdata <- subset(Test_, select = names(Test_) %in% c(names(data_featset)))
+tstdata_noNA <-tstdata[complete.cases(tstdata),]
+tstdata_noNA_in <- tstdata_noNA[setdiff(names(tstdata_noNA),cbind(target_var))]
+fitted.results <- predict(model,tstdata_noNA_in,type='response')
+outsmple_predict <- ifelse(fitted.results > 0.5,1,0)
+# confusion Matrix
+outsmple_conf = confusionMatrix(data=outsmple_predict,
+                reference=tstdata_noNA$TYCOD_O,
+                positive= '1')
+print(paste('Out-of-sample Confusion matrix'))
+outsmple_conf
+
+#Just Out-of-sample accuracy
+outsmple_conf$overall[1]
+```
+
+### Receiver operating characteristic (ROC)
+```{r, echo=FALSE}
+set.seed(12762)
+library(ROCR)
+p = predict(model,tstdata_noNA_in, type="response")
+pr = prediction(p,tstdata_noNA$TYCOD_O)
+ROCperf = performance(pr,"tpr","fpr")
+plot(ROCperf,lwd=1,col="blue",main="ROC Curve-Logistic Regression, feature set 4j")
+abline(a=0,b=1)
+```
+
+
+
+
+
+

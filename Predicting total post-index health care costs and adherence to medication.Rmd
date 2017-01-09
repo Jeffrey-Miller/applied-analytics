@@ -1,0 +1,569 @@
+---
+title: "Predicting total post-index health care costs and adherence to medication"
+authors: "Jeff Miller, Fernanda De La O, and Mary Neviz" 
+date: "March 31, 2016"
+output: html_document
+---
+
+Jeff Miller, J_miller42@u.pacific.edu
+University of the Pacific, School of Engineering and Computer Science
+In fulfilment of the requirements for the degree of Master of Science in Analytics
+In conjunction with the Healthcare Case Studies project, 2016
+
+Creation of linear regression and logistic regression models for predicting total post-index health care costs and adherence to medication for diabetic patients from anonymized raw claims records combined with patient enrollment, diagnostic, national drug code, and procedure reference data.
+
+File import
+```{r}
+setwd('C:/Users/Jeff/Documents/Dropbox/PACIFIC MS Analytics/Sem 2/ANLT_272_01-Health Case Stud/Week 4/Project/CODE DEVELOPMENT')
+#Import data
+dex = read.csv('UOP_data_extract.csv',header=TRUE)
+```
+
+Filter by "drug_class"  Just diabetic patients
+```{r}
+dex=dex[dex$drug_class %in% "*ANTIDIABETICS*",]
+#dim(dex)# 1722   95
+```
+
+Make factors of all categorical features (before split)
+```{r}
+dex$age_grpN = as.factor(dex$age_grpN )
+dex$sexN = as.factor(dex$sexN )
+dex$age_cat = as.factor(dex$age_cat )
+dex$ALCOHOL_DRUG = as.factor(dex$ALCOHOL_DRUG )
+dex$ASTHMA = as.factor(dex$ASTHMA )
+dex$CARDIAC_ARRYTHMIA = as.factor(dex$CARDIAC_ARRYTHMIA )
+dex$CARDIAC_VALVULAR = as.factor(dex$CARDIAC_VALVULAR )
+dex$CEREBROVASCULAR = as.factor(dex$CEREBROVASCULAR )
+dex$CHRONIC_KIDNEY = as.factor(dex$CHRONIC_KIDNEY )
+dex$CHRONIC_PAIN_FIBRO = as.factor(dex$CHRONIC_PAIN_FIBRO )
+dex$CHF = as.factor(dex$CHF )
+dex$COPD = as.factor(dex$COPD )
+dex$DEMENTIA = as.factor(dex$DEMENTIA )
+dex$DEPRESSION = as.factor(dex$DEPRESSION )
+dex$DIABETES = as.factor(dex$DIABETES )
+dex$DYSLIPIDEMIA = as.factor(dex$DYSLIPIDEMIA )
+dex$EPILEPSY_SEIZURE = as.factor(dex$EPILEPSY_SEIZURE )
+dex$HEPATITIS = as.factor(dex$HEPATITIS )
+dex$HIV_AIDS = as.factor(dex$HIV_AIDS )
+dex$HYPERTENSION = as.factor(dex$HYPERTENSION )
+dex$LIVER_GALLBLADDER_PANCREAS = as.factor(dex$LIVER_GALLBLADDER_PANCREAS )
+dex$MI_CAD = as.factor(dex$MI_CAD )
+dex$OSTEOARTHRITIS = as.factor(dex$OSTEOARTHRITIS )
+dex$PARALYSIS = as.factor(dex$PARALYSIS )
+dex$PEPTIC_ULCER = as.factor(dex$PEPTIC_ULCER )
+dex$PERIPHERAL_VASCULAR = as.factor(dex$PERIPHERAL_VASCULAR )
+dex$RENAL_FAILURE = as.factor(dex$RENAL_FAILURE )
+dex$RHEUMATOLOGIC = as.factor(dex$RHEUMATOLOGIC )
+dex$SCHIZOPHRENIA = as.factor(dex$SCHIZOPHRENIA )
+dex$SLEEP_DISORDERS = as.factor(dex$SLEEP_DISORDERS )
+dex$SMOKING = as.factor(dex$SMOKING )
+dex$THYROID = as.factor(dex$THYROID )
+dex$Solid_Tumor = as.factor(dex$Solid_Tumor )
+dex$Metastatic = as.factor(dex$Metastatic )
+dex$Leukemia_Lymphoma = as.factor(dex$Leukemia_Lymphoma )
+dex$Other_Cancer = as.factor(dex$Other_Cancer )
+dex$Cancer_In_Situ = as.factor(dex$Cancer_In_Situ )
+dex$pre_er_flag = as.factor(dex$pre_er_flag )
+dex$pdc_80_flag = as.factor(dex$pdc_80_flag )
+```
+
+Train and test data - random split
+```{r}
+library(dplyr)
+train<-sample_frac(dex, 0.8)
+sid<-as.numeric(rownames(train))
+testDF<-dex[-sid,]
+```
+
+Make dummy vars for categorical with > 2 conditions 
+and log_post_total_cost in test data to facilitate comparison
+```{r}
+test=testDF
+#levels(test2$age_grpN) #"2" "3" "4"
+test$age_grp2 = test$age_grpN == "2"
+test$age_grp3 = test$age_grpN == "3"
+test$age_grp4 = test$age_grpN == "4"
+
+#Transformation of post_total_cost by creating Log log_post_total_cost
+test$log_post_total_cost= log(test$post_total_cost)
+```
+
+Exclude features
+```{r}
+#excluding: 
+#Post anything, pdc_cat, type of insurance, copay, and age_cat( except post_total_cost)
+train1=train[,-c(2:16,18,19,22:26,69,72:75,78:92,94,95)] #(1,61,68 )keeping pdc, pre_CCI, num_ip,
+train1=train1[,c(1,3:50,2,51)] #post_total_cost  between pre_er_flag and pdc_80_flag 
+```
+
+categorical features N < 50 in total samples 
+```{r}
+#c(3,4,6:8,10:12,16:18,23:28,32:34,36)
+#"ALCOHOL_DRUG"               4
+#"ASTHMA"                      5
+#"CARDIAC_VALVULAR"          7
+#"CEREBROVASCULAR"            8
+#"CHRONIC_KIDNEY"              9
+#"CHF"                       11
+#"COPD"                       12
+#"DEMENTIA"                    13
+#"EPILEPSY_SEIZURE"          17
+#"HEPATITIS"                   18   
+#"HIV_AIDS"                      19
+#"PARALYSIS"                 24
+#"PEPTIC_ULCER"               25
+#"PERIPHERAL_VASCULAR"         26
+#"RENAL_FAILURE"             27
+#"RHEUMATOLOGIC"              28
+#"SCHIZOPHRENIA"               29
+#"Solid_Tumor"               33
+#"Metastatic"                 34
+#"Leukemia_Lymphoma"           35
+#"Cancer_In_Situ"            37
+```
+
+Exclusion of categorical features < 50
+```{r}
+#Of the categorical features c(4,5,7:9,11:13,17:19,24:29,33:35,37) had N counts < 50 out of the 3550 total.
+train2=train1[,-c(4,5,7:9,11:13,17:19,24:29,33:35,37)]
+```
+
+post_total_cost linearity test
+```{r}
+qqnorm(train2$post_total_cost)
+#Pic Filename: Total PostIDX cost normality.png
+```
+
+Transformation of post_total_cost by creating Log (need to log_post_total_cost in test data as well)
+```{r}
+train2$log_post_total_cost  = log(train2$post_total_cost)
+qqnorm(train2$log_post_total_cost)
+qqline(train2$log_post_total_cost)
+
+#Pic Filename: LogTotal PostIDX Normality.png
+```
+
+Make dummy vars for categorical with > 2 conditions 
+```{r}
+#levels(train2$age_grpN) #"2" "3" "4"
+train2$age_grp2 = train2$age_grpN == "2"
+train2$age_grp3 = train2$age_grpN == "3"
+train2$age_grp4 = train2$age_grpN == "4"
+
+train3=train2[,c(1,2,32:34,3:31)]  #reorder columns
+```
+
+Remove post_total_cost from training data
+```{r}
+train3=train3[,c(1:31,33,34)] #Remove post_total_cost
+```
+
+Pair plots of just continuous (numeric) features
+```{r}
+train3cont=train3[,c(1,20:29,33)]
+pairs(train3cont)
+```
+
+Exclusion of independent variable correlations observed in pairs plot
+```{r}
+#pre_total_cost and pre_medical_cost,
+train3=train3[,-c(25,26)]
+```
+
+Another pair plotting of remaining continuous (numeric) features
+```{r}
+train3cont=train3[,c(1,20:27,31)]
+pairs(train3cont)
+#No visually discernable independent variable correlation with the dependent variable, post_total_cost.
+#Pic Filename: Pairs Plot of Continuous freature.png 
+```
+
+Correlation coefficients of remaining continuous features
+```{r}
+cor(train3cont)
+```
+
+```{r}
+#Features correlating to log_post_total_cost in descending order:
+#pre_rx_cost  	0.347965233
+#num_op 	      0.30397408
+#pre_CCI     	0.26242361
+#pre_op_cost   0.254525751
+#num_ip    	  0.12659015
+#pre_ip_cost	  0.12040835
+#num_er 	      0.10133281
+#pdc	          0.081256502
+#pre_er_cost 	0.075417753
+```
+
+Categorical feature check with Box Plots
+```{r}
+train3cat=train3[,c(2:19,28:31)]
+attach(train3cat) 
+```
+Typical box plots as examples
+```{r}
+boxplot(log_post_total_cost~ age_grp3) #Q1-Q3, overlap, close medians
+#Pic Filename: Typical Box plot of features with.png
+
+boxplot(log_post_total_cost~ age_grp4) #dissimilar medians
+#Pic Filename: Typical Box plot of features with dissimilar medians.png
+```
+
+```{r}
+par(mfrow= c(1,2))
+boxplot(log_post_total_cost~ age_grpN)
+boxplot(log_post_total_cost~ age_grp2) #Q1-Q3, overlap, close medians
+boxplot(log_post_total_cost~ age_grp3) #Q1-Q3, overlap, close medians
+boxplot(log_post_total_cost~ age_grp4) #dissimilar medians
+boxplot(log_post_total_cost~ sexN) #Q1-Q3, overlap, close medians
+boxplot(log_post_total_cost~ CARDIAC_ARRYTHMIA) #dissimilar medians
+boxplot(log_post_total_cost~ CHRONIC_PAIN_FIBRO) #dissimilar medians
+boxplot(log_post_total_cost~ DEPRESSION)#dissimilar medians
+boxplot(log_post_total_cost~ DIABETES)#Q1-Q3, overlap, close medians
+boxplot(log_post_total_cost~ DYSLIPIDEMIA)#Q1-Q3, overlap, close medians
+boxplot(log_post_total_cost~ HYPERTENSION)#Q1-Q3, overlap, close median
+boxplot(log_post_total_cost~ LIVER_GALLBLADDER_PANCREAS) #Q1-Q3, overlap, close median
+boxplot(log_post_total_cost~ MI_CAD)#dissimilar medians
+boxplot(log_post_total_cost~ OSTEOARTHRITIS)#Q1-Q3, overlap, close medians
+boxplot(log_post_total_cost~ SLEEP_DISORDERS)#dissimilar medians
+boxplot(log_post_total_cost~ SMOKING)#Q1-Q3, overlap, close medians
+boxplot(log_post_total_cost~ THYROID) #Q1-Q3, overlap, close medians
+boxplot(log_post_total_cost~ Other_Cancer)#dissimilar medians
+boxplot(log_post_total_cost~ pre_ip_flag)#dissimilar medians
+boxplot(log_post_total_cost~ pre_er_flag)#Q1-Q3, overlap, close medians
+boxplot(log_post_total_cost~ pdc_80_flag)#Q1-Q3, overlap, close medians
+```
+The box plots showed as set of features with overlapping interquartile ranges and close medians, and a second group with dissimilar medians. We elected to not eliminate any categorical features on the basis of box plot similarity because they all seemed closer and we can't tell if the differences are significant. 
+
+Leaps Information Criteria (IC) on continuous/numeric features
+
+The leaps command carries out an exhaustive search for the best subsets of the explanatory variables for predicting a response variable.
+```{r}
+library(leaps)
+subsetMod= regsubsets(log_post_total_cost~ . -age_grpN, data = train3, nvmax= 7)
+subsetModSum= summary(subsetMod)
+```
+Leaps plots
+```{r}
+plot(subsetModSum$bic, xlab = "N variables", ylab = "BIC(Exhaustive Method)")
+plot(subsetMod, scale = "bic")
+
+#Pic Filename: Leaps BIC Vs N variables.png
+```
+Pic shows that the BIC exhaustive method suggests an optimality of 4 features without over fitting, before the forced inclusion of Gender and Age.
+
+Leaps Coefficients
+```{r}
+#Lowest BIC of N variables is preferred
+subsetModCeof = coef(subsetMod,which.min(subsetModSum$bic))
+#subsetModCeof 
+```
+     (Intercept)     age_grp2TRUE            sexN2 SLEEP_DISORDERS1          pre_CCI 
+    7.1277581359    -0.2377351084     0.2185798526     0.3748578471     0.1780233479 
+     pre_rx_cost           num_op 
+    0.0001374982     0.0304412418 
+    
+These are the features and their coefficients which the BIC exhaustive method suggests.
+    
+    
+
+Ridge Regression (alpha = 0) On continuous and categorical features
+```{r}
+attach(train3) 
+#install.packages("glmnet")
+library(glmnet)
+lambdaRange = (10^seq(-1,2,length = 100))
+x = model.matrix(log_post_total_cost ~ ., data = train3)[,-1] #[,-1] Drops intercept
+#head(x)
+
+ridMod = glmnet(x,log_post_total_cost, alpha = 0, lambda = lambdaRange)
+dim(coef(ridMod)) #33 100, 33 features
+set.seed(1000)
+cv.out = cv.glmnet(x, log_post_total_cost, alpha = 0)
+plot(cv.out)
+#Pic Filename: Ridge Regression MSE Vs Log Lambda.png
+
+bestLambda = cv.out$lambda.min
+#The bestLambda from Ridge Regression is 0.6445485
+
+predict(ridMod, type = "coefficients", s = bestLambda)
+```
+
+Lasso (alpha = 1) On continuous and categorical features
+```{r}
+lasMod = glmnet(x,log_post_total_cost, alpha = 1, lambda = lambdaRange)
+dim(coef(lasMod)) # 33 100, 33 features
+set.seed(1000)
+cv.out = cv.glmnet(x, log_post_total_cost, alpha = 1)
+plot(cv.out)
+#Pic Filename: Lasso MSE Vs Log Lambda.png
+
+bestLambda2 = cv.out$lambda.min
+#bestLambda2
+#The bestLambda from the Lasso method is 0.02211104
+
+predict(lasMod, type = "coefficients", s = bestLambda2)
+```
+
+Based on observed heteroscedasticity in the residual vs fitted plot for our initial four sets of selected features (models), we repeated the selection process a second time.
+
+Step regression (AIC)
+```{r}
+step(lm(log_post_total_cost~ . -age_grpN, data = train3), direction = 'backward')
+#The lower the AIC the better the model
+```
+
+```{r}
+fit1 <- lm(formula = log_post_total_cost ~ age_grp2 + age_grp3 + sexN + 
+    OSTEOARTHRITIS + SLEEP_DISORDERS + pre_CCI + pre_er_cost + 
+    pre_rx_cost + pre_op_cost + num_ip + num_op, data = train3)
+summary(fit1)
+
+#par(mfrow=c(2,2)) #2 x 2 plot frame
+plot(fit1)
+```
+
+Ridge
+```{r}
+library(leaps)
+subsetMod= regsubsets(log_post_total_cost ~ age_grp2 + age_grp3 + sexN + 
+    DEPRESSION + OSTEOARTHRITIS + SLEEP_DISORDERS + pre_CCI + 
+    pre_er_cost + pre_rx_cost + pre_op_cost + num_ip + num_op + 
+    pre_er_flag, data = train3)
+subsetModSum= summary(subsetMod)
+
+plot(subsetModSum$bic, xlab = "N variables", ylab = "BIC(Exhaustive Method)")
+#Pic Filename: Ridge Regression #2  MSE Vs Log Lambda.png
+
+#Because this plot says that 3 or 5 is the best number of variables for our model that is what we will take from our ridge regression
+```
+
+Taking our model made of the top 5 variables, via ridge
+```{r}
+fit2 <- lm(log_post_total_cost ~ DEPRESSION + SLEEP_DISORDERS + pre_CCI + 
+    pre_rx_cost + num_op, data = train3)
+summary(fit2)
+```
+
+The 3rd model is based on model 1, and removing everything with a p-value > .05
+```{r}
+fit3 <- lm(formula = log_post_total_cost ~ age_grp2 + age_grp3 + sexN + 
+    SLEEP_DISORDERS + pre_CCI + pre_er_cost + 
+    pre_rx_cost + pre_op_cost + num_op, data = train3)  
+summary(fit3)
+```
+
+Insure each model includes gender and age features when applied to test.
+```{r}
+fit1t <- lm(formula = log_post_total_cost ~ age_grp2 + age_grp3 + sexN + 
+    OSTEOARTHRITIS + SLEEP_DISORDERS + pre_CCI + pre_er_cost + 
+    pre_rx_cost + pre_op_cost + num_ip + num_op, data = test)
+
+fit2t <- lm(log_post_total_cost ~ DEPRESSION + SLEEP_DISORDERS + pre_CCI + 
+    pre_rx_cost + num_op + age_grp2 + age_grp3 + age_grp4 + sexN, data = test)
+
+fit3t <- lm(formula = log_post_total_cost ~ age_grp2 + age_grp3 + sexN + 
+    SLEEP_DISORDERS + pre_CCI + pre_er_cost + 
+    pre_rx_cost + pre_op_cost + num_op, data = test)  
+```
+
+#Model assumption validation
+
+Plotting Residuals of models 1-3
+```{r}
+par(mfrow=c(3,1)) #3 x 1 plot frame
+plot(resid(fit1t))
+plot(resid(fit2t))
+plot(resid(fit3t))
+par(mfrow=c(1,1))
+```
+
+Plotting Residuals of models 1-3 vs fitted (predicted) values
+```{r}
+par(mfrow=c(3,1)) #3 x 1 plot frame
+plot(predict(fit1t, newdata = test), resid(fit1t))
+plot(predict(fit2t, newdata = test), resid(fit1t))
+plot(predict(fit3t, newdata = test), resid(fit1t))
+par(mfrow=c(1,1))
+
+plot(fit1t)
+#Pic Filename: Model 1 Resid vs fitted values.png
+#Pic Filename: Model 1 Std Error Resid Vs Theo Quantiles-Normality assump.png
+#Pic Filename: Model 1 SqRt Std Resid Vs Fitted Values.png
+#Pic Filename: Model 1 Std Residuals Vs Leverage.png
+
+plot(fit2t)
+#Pic Filename: Model 2 Resid vs fitted values.png
+#Pic Filename: Model 2 Std Error Resid Vs Theo Quantiles-Normality assump.png
+#Pic Filename: Model 2 SqRt Std Resid Vs Fitted Values.png
+#Pic Filename: Model 2 Std Residuals Vs Leverage.png
+
+plot(fit3t)
+#Pic Filename: Model 3 Resid vs fitted values.png
+#Pic Filename: Model 3 Std Error Resid Vs Theo Quantiles-Normality assump.png
+#Pic Filename: Model 3 SqRt Std Resid Vs Fitted Values.png
+#Pic Filename: Model 3 Std Residuals Vs Leverage.png
+
+```
+
+Correlation coefficients, models 1-3
+```{r}
+coef(fit1t)[1:12]
+```
+     (Intercept)     age_grp2TRUE     age_grp3TRUE            sexN2  OSTEOARTHRITIS1 
+    7.320584e+00    -2.656747e-01    -2.640779e-01     2.310671e-01     2.777576e-01 
+SLEEP_DISORDERS1          pre_CCI      pre_er_cost      pre_rx_cost      pre_op_cost 
+    3.553020e-01     1.431951e-01     7.939088e-05     1.307414e-04     3.070015e-05 
+          num_ip           num_op 
+    4.054952e-02     1.657456e-02 
+
+```{r}
+coef(fit2t)[1:10]
+```
+
+     (Intercept)      DEPRESSION1 SLEEP_DISORDERS1          pre_CCI      pre_rx_cost 
+    7.3673297557     0.1736564731     0.4060321365     0.1699103729     0.0001299332 
+          num_op     age_grp2TRUE     age_grp3TRUE     age_grp4TRUE            sexN2 
+    0.0282455941    -0.2971066567    -0.2914608580               NA     0.2341770106 
+
+
+```{r}
+coef(fit3t)[1:10]
+```
+
+     (Intercept)     age_grp2TRUE     age_grp3TRUE            sexN2 SLEEP_DISORDERS1 
+    7.392394e+00    -3.099911e-01    -3.035333e-01     2.358197e-01     3.875182e-01 
+         pre_CCI      pre_er_cost      pre_rx_cost      pre_op_cost           num_op 
+    1.414260e-01     1.030431e-04     1.296345e-04     2.955183e-05     1.984972e-02
+
+
+
+#Comparing model performance
+
+Summary data comparisons R Squared and RSS (residual sum of squares)
+(NUMBERS AND FEATURE NAMES TO CUT & PASTE INTO WORD TABLE)
+```{r}
+summary(fit1t) #Adjusted R-squared:  0.2079,   
+summary(fit2t) #Adjusted R-squared:  0.1988 
+summary(fit3t) #Adjusted R-squared:  0.1967 
+```
+
+```{r}
+sum(resid(fit1t)^2)# 1565.264
+sum(resid(fit2t)^2)# 1590.67
+sum(resid(fit3t)^2)# 1576.365
+```
+
+#Data comparison - Y hat(predicted) vs actual Y ?  
+```{r}
+plot(predict(fit1t, newdata = test),test$log_post_total_cost,main="Model 1 Actual Vs Predicted \nLog of Post Index Cost")
+
+#Pic Filename: Model 1 Actual Vs Predicted Log of Post Index Cost.png
+
+plot(predict(fit2t, newdata = test),test$log_post_total_cost,main="Model 2 Actual Vs Predicted \nLog of Post Index Cost")
+
+#Pic Filename: Model 2 Actual Vs Predicted Log of Post Index Cost.png
+
+plot(predict(fit3t, newdata = test),test$log_post_total_cost,main="Model 3 Actual Vs Predicted \nLog of Post Index Cost")
+
+#Pic Filename: Model 3 Actual Vs Predicted Log of Post Index Cost.png
+
+```
+
+COMMENTS ON RESIDUAL ANALYSIS TO PARAPHRASE IN REPORT
+
+(https://onlinecourses.science.psu.edu/stat501/node/36)
+When conducting a residual analysis, a "residuals versus fits plot" is the most frequently created plot. It is a scatter plot of residuals on the y axis and fitted values (estimated responses) on the x axis. The plot is used to detect non-linearity, unequal error variances, and outliers. 
+
+The residual = 0 line corresponds to the estimated regression line.
+Here are the characteristics of a well-behaved residual vs. fits plot and what they suggest about the appropriateness of the simple linear regression model:
+
+The residuals "bounce randomly" around the 0 line. This suggests that the assumption that the relationship is linear is reasonable.
+The residuals roughly form a "horizontal band" around the 0 line. This suggests that the variances of the error terms are equal.
+No one residual "stands out" from the basic random pattern of residuals. This suggests that there are no outliers.
+
+Another good one: http://docs.statwing.com/interpreting-residual-plots-to-improve-your-regression/
+
+ANOVA - Analysis of variance comparison of models 1 - 3 on TEST data?
+```{r}
+anova(fit1t) 
+```
+Response: log_post_total_cost
+                 Df  Sum Sq Mean Sq F value    Pr(>F)    
+age_grp2          1    9.58   9.576  5.8242 0.0159953 *  
+age_grp3          1   19.47  19.466 11.8396 0.0006051 ***
+sexN              1    7.80   7.800  4.7439 0.0296469 *  
+OSTEOARTHRITIS    1   36.05  36.052 21.9269 3.244e-06 ***
+SLEEP_DISORDERS   1   35.08  35.079 21.3354 4.385e-06 ***
+pre_CCI           1  122.69 122.690 74.6208 < 2.2e-16 ***
+pre_er_cost       1    4.14   4.142  2.5193 0.1127908    
+pre_rx_cost       1  146.29 146.293 88.9759 < 2.2e-16 ***
+pre_op_cost       1   42.71  42.713 25.9780 4.165e-07 ***
+num_ip            1    0.41   0.406  0.2472 0.6191709    
+num_op            1   12.60  12.600  7.6632 0.0057451 ** 
+Residuals       952 1565.26   1.644   
+```{r}
+anova(fit2t) 
+```
+Response: log_post_total_cost
+                 Df  Sum Sq Mean Sq F value    Pr(>F)    
+DEPRESSION        1   24.45  24.452 14.6804 0.0001357 ***
+SLEEP_DISORDERS   1   37.28  37.276 22.3797 2.575e-06 ***
+pre_CCI           1  126.96 126.957 76.2217 < 2.2e-16 ***
+pre_rx_cost       1  145.90 145.902 87.5958 < 2.2e-16 ***
+num_op            1   59.24  59.245 35.5691 3.463e-09 ***
+age_grp2          1    0.03   0.033  0.0196 0.8886813    
+age_grp3          1    5.28   5.279  3.1697 0.0753359 .  
+sexN              1   12.27  12.269  7.3659 0.0067672 ** 
+Residuals       955 1590.67   1.666  
+```{r}
+anova(fit3t) 
+```
+Response: log_post_total_cost
+                 Df  Sum Sq Mean Sq F value    Pr(>F)    
+age_grp2          1    9.58   9.576  5.7953 0.0162579 *  
+age_grp3          1   19.47  19.466 11.7809 0.0006241 ***
+sexN              1    7.80   7.800  4.7204 0.0300523 *  
+SLEEP_DISORDERS   1   42.93  42.927 25.9792 4.161e-07 ***
+pre_CCI           1  124.15 124.154 75.1370 < 2.2e-16 ***
+pre_er_cost       1    6.67   6.667  4.0347 0.0448561 *  
+pre_rx_cost       1  148.23 148.226 89.7052 < 2.2e-16 ***
+pre_op_cost       1   47.96  47.958 29.0237 9.009e-08 ***
+num_op            1   18.94  18.942 11.4634 0.0007388 ***
+Residuals       954 1576.36   1.652
+
+
+It looks like the p values are small suggesting that most of the features are significant.
+
+Null Hypothesis: Mean post total cost is unaffected by any of the independent  variables(features), i.e. the Betas are all zero.
+
+Our P=Values are small enough to allow us to reject the null hypothesis but we must look to the F-Statistic to garner an idea of the efficacy of our model
+
+F-Statistic: 
+The F statistics provided by ANOVA, compares the variation among the different models to the variation within each model. Allows us to see if the variation among sample means dominates over the variation within groups, or not.
+
+Our F-Statistic shows that a good amount of our variation can be owed to variation within the models themselves All in all, the ANOVA allows us to see specifics about our models in comparison to each other, something that simple summaries for each model do not allow us to do. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
